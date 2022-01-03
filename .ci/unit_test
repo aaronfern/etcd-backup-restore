@@ -62,13 +62,13 @@ fi
 
 RUN_NEGATIVE=${RUN_NEGATIVE:-"true"}
 
-GINKGO_COMMON_FLAGS="-r -timeout=1h0m0s --progress -slowSpecThreshold=180 -mod=vendor"
+GINKGO_COMMON_FLAGS="-r -timeout=1h0m0s --progress -slow-spec-threshold=180s -mod=vendor"
 
 if [ -z $COVER ] || [ "$COVER" = false ] ; then
   echo "[INFO] Test coverage is disabled."
 
   # run everything which is not part of negative scenarios with randomizeAllSpecs parameters.
-  ginkgo -race -trace $GINKGO_COMMON_FLAGS -gcflags=all=-d=checkptr=0 --randomizeAllSpecs --randomizeSuites --failOnPending --skip="NEGATIVE\:.*" ${TEST_PACKAGES}
+  ginkgo -race -trace $GINKGO_COMMON_FLAGS -gcflags=all=-d=checkptr=0 --randomize-all --randomize-suites --fail-on-pending --skip="NEGATIVE\:.*" ${TEST_PACKAGES}
 
   if [ "$RUN_NEGATIVE" = "true" ] ; then
     #run negative scenario in a sequenced manner (removed failOnPending as one spec in restore test is marked as 'X' for excluding)

@@ -33,7 +33,7 @@ import (
 	"go.etcd.io/etcd/pkg/types"
 
 	. "github.com/gardener/etcd-backup-restore/pkg/snapshot/restorer"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
@@ -456,8 +456,9 @@ var _ = Describe("Running Restorer", func() {
 		//this test is excluded for now and is kept for reference purpose only
 		// there needs to be some re-look done to validate the scenarios when a restore can happen on a running snapshot and accordingly include the test
 		// as per current understanding the flow ensures it cannot happen but external intervention can not be ruled out as the command allows calling restore while snapshotting.
-		XContext("while snapshotter is running ", func() {
+		Context("while snapshotter is running ", func() {
 			It("Should stop snapshotter while restore is happening", func() {
+				Skip("Test skipped as it is for reference purpose only")
 				wg.Add(1)
 				populatorCtx, cancelPopulator := context.WithTimeout(testCtx, 5*time.Second)
 				defer cancelPopulator()

@@ -26,7 +26,7 @@ import (
 	brtypes "github.com/gardener/etcd-backup-restore/pkg/types"
 
 	"github.com/gardener/etcd-backup-restore/test/utils"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/embed"
@@ -50,7 +50,12 @@ var (
 
 func TestRestorer(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Restorer Suite")
+	suiteConfig, reporterConfig := GinkgoConfiguration()
+	suiteConfig.SkipStrings = []string{"NEVER-RUN"}
+	reporterConfig.FullTrace = true
+	// pass it in to RunSpecs
+	//RunSpecs(t, "My Suite", suiteConfig, reporterConfig)
+	RunSpecs(t, "Restorer Suite", suiteConfig, reporterConfig)
 }
 
 var _ = SynchronizedBeforeSuite(func() []byte {
