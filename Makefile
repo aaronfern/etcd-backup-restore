@@ -20,6 +20,8 @@ BUILD_DIR           := build
 BIN_DIR             := bin
 COVERPROFILE        := test/output/coverprofile.out
 
+IMG ?= ${IMAGE_REPOSITORY}:${IMAGE_TAG}
+
 .DEFAULT_GOAL := build-local
 
 .PHONY: revendor
@@ -40,15 +42,15 @@ build:
 build-local:
 	@env LOCAL_BUILD=1 .ci/build
 
-.PHONY: docker-image
-docker-image:
+.PHONY: docker-build
+docker-build:
+	@.ci/build
 	@if [[ ! -f $(BIN_DIR)/linux-amd64/etcdbrctl ]]; then echo "No binary found. Please run 'make build'"; false; fi
-	@docker build -t $(IMAGE_REPOSITORY):$(IMAGE_TAG) -f $(BUILD_DIR)/Dockerfile --rm .
+	@docker build -t ${IMG} -f $(BUILD_DIR)/Dockerfile --rm .
 
 .PHONY: docker-push
 docker-push:
-	@if ! docker images $(IMAGE_REPOSITORY) | awk '{ print $$2 }' | grep -q -F $(IMAGE_TAG); then echo "$(IMAGE_REPOSITORY) version $(IMAGE_TAG) is not yet built. Please run 'make docker-image'"; false; fi
-	@docker push $(IMAGE_REPOSITORY):$(IMAGE_TAG)
+	@docker push ${IMG}
 
 .PHONY: clean
 clean:
