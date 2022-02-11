@@ -210,6 +210,32 @@ func (c *validatorOptions) validate() error {
 	return nil
 }
 
+type addmemberOptions struct {
+	Endpoint  string `json:"endpoint,omitempty"`
+	NewMember string `json:"newMember,omitempty"`
+}
+
+// newValidatorOptions returns the validation config.
+func newAddmemberOptions() *addmemberOptions {
+	return &addmemberOptions{
+		Endpoint: "http://127.0.0.1:2380",
+	}
+}
+
+// AddFlags adds the flags to flagset.
+func (c *addmemberOptions) addFlags(fs *flag.FlagSet) {
+	fs.StringVar(&c.Endpoint, "etcd-endpoint", c.Endpoint, "endpoint of an already existing etcd")
+	fs.StringVar(&c.NewMember, "new-member-peer-url", c.NewMember, "Peer URL of the new member that will be added")
+}
+
+// Validate validates the config.
+func (c *addmemberOptions) validate() error {
+	if len(c.NewMember) == 0 {
+		return errors.New("NewMemberPeerURL can not be an empty string")
+	}
+	return nil
+}
+
 type snapshotterOptions struct {
 	etcdConnectionConfig    *brtypes.EtcdConnectionConfig
 	compressionConfig       *compressor.CompressionConfig

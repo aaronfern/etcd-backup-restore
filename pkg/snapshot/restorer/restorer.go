@@ -92,6 +92,7 @@ func (r *Restorer) RestoreAndStopEtcd(ro brtypes.RestoreOptions) error {
 
 // Restore restore the etcd data directory as per specified restore options but returns the ETCD server that it statrted.
 func (r *Restorer) Restore(ro brtypes.RestoreOptions) (*embed.Etcd, error) {
+	return nil, nil
 	if err := r.restoreFromBaseSnapshot(ro); err != nil {
 		return nil, fmt.Errorf("failed to restore from the base snapshot :%v", err)
 	}
@@ -132,10 +133,14 @@ func (r *Restorer) restoreFromBaseSnapshot(ro brtypes.RestoreOptions) error {
 		return nil
 	}
 	r.logger.Infof("Restoring from base snapshot: %s", path.Join(ro.BaseSnapshot.SnapDir, ro.BaseSnapshot.SnapName))
+	// peerUrl, _ := url.Parse(miscellaneous.GetListenPeerURLs())
+	// initialPeerUrl, _ := types.NewURLsMap(miscellaneous.GetInitialAdvertisePeerURLs()) //url.Parse(miscellaneous.GetInitialAdvertisePeerURLs()) //types.NewURLsMap(miscellaneous.GetInitialAdvertisePeerURLs())
+	// m := make(map[string]url.URL)
+	// m["default"] = *initialPeerUrl
 	cfg := etcdserver.ServerConfig{
-		InitialClusterToken: ro.Config.InitialClusterToken,
+		InitialClusterToken: ro.Config.InitialClusterToken, //miscellaneous.GetInitialClusterToken(), //ro.Config.InitialClusterToken,
 		InitialPeerURLsMap:  ro.ClusterURLs,
-		PeerURLs:            ro.PeerURLs,
+		PeerURLs:            ro.PeerURLs, //[]url.URL{*peerUrl}, //ro.PeerURLs,
 		Name:                ro.Config.Name,
 	}
 	if err := cfg.VerifyBootstrap(); err != nil {

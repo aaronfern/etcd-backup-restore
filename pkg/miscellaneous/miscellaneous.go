@@ -133,10 +133,10 @@ func getStructuredBackupList(snapList brtypes.SnapList) []backup {
 func StartEmbeddedEtcd(logger *logrus.Entry, ro *brtypes.RestoreOptions) (*embed.Etcd, error) {
 	cfg := embed.NewConfig()
 	cfg.Dir = filepath.Join(ro.Config.RestoreDataDir)
-	DefaultListenPeerURLs := "http://localhost:0"
-	DefaultListenClientURLs := "http://localhost:0"
-	DefaultInitialAdvertisePeerURLs := "http://localhost:0"
-	DefaultAdvertiseClientURLs := "http://localhost:0"
+	DefaultListenPeerURLs := "http://localhost:0"           //GetListenPeerURLs()                     //"http://localhost:0"
+	DefaultListenClientURLs := "http://localhost:0"         //GetListenClientURLs()                 //"http://localhost:0"
+	DefaultInitialAdvertisePeerURLs := "http://localhost:0" //GetInitialAdvertisePeerURLs() //"http://localhost:0"
+	DefaultAdvertiseClientURLs := "http://localhost:0"      //GetAdvertiseClientURLs()           //"http://localhost:0"
 	lpurl, _ := url.Parse(DefaultListenPeerURLs)
 	apurl, _ := url.Parse(DefaultInitialAdvertisePeerURLs)
 	lcurl, _ := url.Parse(DefaultListenClientURLs)
@@ -145,13 +145,14 @@ func StartEmbeddedEtcd(logger *logrus.Entry, ro *brtypes.RestoreOptions) (*embed
 	cfg.LCUrls = []url.URL{*lcurl}
 	cfg.APUrls = []url.URL{*apurl}
 	cfg.ACUrls = []url.URL{*acurl}
-	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name) //GetInitialCluster() //cfg.InitialClusterFromName(cfg.Name)
 	cfg.QuotaBackendBytes = ro.Config.EmbeddedEtcdQuotaBytes
 	cfg.MaxRequestBytes = ro.Config.MaxRequestBytes
 	cfg.MaxTxnOps = ro.Config.MaxTxnOps
 	cfg.AutoCompactionMode = ro.Config.AutoCompactionMode
 	cfg.AutoCompactionRetention = ro.Config.AutoCompactionRetention
 	cfg.Logger = "zap"
+
 	e, err := embed.StartEtcd(cfg)
 	if err != nil {
 		return nil, err

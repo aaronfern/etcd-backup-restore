@@ -23,7 +23,6 @@ import (
 	"github.com/gardener/etcd-backup-restore/pkg/initializer/validator"
 	"github.com/gardener/etcd-backup-restore/pkg/metrics"
 	"github.com/gardener/etcd-backup-restore/pkg/miscellaneous"
-	"github.com/gardener/etcd-backup-restore/pkg/snapshot/restorer"
 	"github.com/gardener/etcd-backup-restore/pkg/snapstore"
 	brtypes "github.com/gardener/etcd-backup-restore/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
@@ -98,7 +97,7 @@ func NewInitializer(options *brtypes.RestoreOptions, snapstoreConfig *brtypes.Sn
 func (e *EtcdInitializer) restoreCorruptData() (bool, error) {
 	logger := e.Logger
 	tempRestoreOptions := *(e.Config.RestoreOptions.DeepCopy())
-	dataDir := tempRestoreOptions.Config.RestoreDataDir
+	//dataDir := tempRestoreOptions.Config.RestoreDataDir
 
 	if e.Config.SnapstoreConfig == nil || len(e.Config.SnapstoreConfig.Provider) == 0 {
 		logger.Warnf("No snapstore storage provider configured.")
@@ -130,15 +129,17 @@ func (e *EtcdInitializer) restoreCorruptData() (bool, error) {
 		return false, fmt.Errorf("failed to delete previous temporary data directory: %v", err)
 	}
 
-	rs := restorer.NewRestorer(store, logrus.NewEntry(logger))
-	if err := rs.RestoreAndStopEtcd(tempRestoreOptions); err != nil {
-		err = fmt.Errorf("failed to restore snapshot: %v", err)
-		return false, err
-	}
+	//TODO Trying out with no embedded etcd started. Good luck
+	//Stopped embedded etcd to be able to test the scale-up and scale-down scenarios.
+	// rs := restorer.NewRestorer(store, logrus.NewEntry(logger))
+	// if err := rs.RestoreAndStopEtcd(tempRestoreOptions); err != nil {
+	// 	err = fmt.Errorf("failed to restore snapshot: %v", err)
+	// 	return false, err
+	// }
 
-	if err := e.removeContents(dataDir); err != nil {
-		return false, fmt.Errorf("failed to remove corrupt contents with restored snapshot: %v", err)
-	}
+	// if err := e.removeContents(dataDir); err != nil {
+	// 	return false, fmt.Errorf("failed to remove corrupt contents with restored snapshot: %v", err)
+	// }
 	logger.Infoln("Successfully restored the etcd data directory.")
 	return true, nil
 }

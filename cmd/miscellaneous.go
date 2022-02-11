@@ -16,7 +16,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 
 	"github.com/gardener/etcd-backup-restore/pkg/miscellaneous"
 	"github.com/gardener/etcd-backup-restore/pkg/snapstore"
@@ -74,4 +76,11 @@ func BuildRestoreOptionsAndStore(opts *restorerOptions) (*brtypes.RestoreOptions
 		ClusterURLs:   clusterUrlsMap,
 		PeerURLs:      peerUrls,
 	}, store, nil
+}
+
+func getMemberURL() string {
+	end := strings.Split(os.Getenv("ETCD_ENDPOINT"), "//")
+	//memberURL := "http://" + podName + ".etcd-main-peer.default.svc.cluster.local:2380"
+	memberURL := end[0] + "//" + os.Getenv("POD_NAME") + "." + end[1]
+	return memberURL
 }
