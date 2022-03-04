@@ -25,7 +25,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -452,22 +451,6 @@ func (h *HTTPHandler) serveConfig(rw http.ResponseWriter, req *http.Request) {
 	http.ServeFile(rw, req, outputFileName)
 
 	h.Logger.Info("Served config for ETCD instance.")
-}
-
-func parsePeerURL(peerURL string) (string, string, string, error) {
-	tokens := strings.Split(peerURL, "@")
-	if len(tokens) < 3 {
-		return "", "", "", fmt.Errorf("total length of tokens is less than three")
-	}
-	return tokens[0], tokens[1], tokens[2], nil
-}
-
-func parseAdvClientURL(advClientURL string) (string, string, string, error) {
-	tokens := strings.Split(advClientURL, "@")
-	if len(tokens) < 3 {
-		return "", "", "", fmt.Errorf("total length of tokens is less than three")
-	}
-	return tokens[0], tokens[1], tokens[2], nil
 }
 
 // delegateReqToLeader forwards the incoming http/https request to BackupLeader.

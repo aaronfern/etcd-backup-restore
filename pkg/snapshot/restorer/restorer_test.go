@@ -50,7 +50,7 @@ const (
 	allSnapsInV2
 )
 
-var _ = Describe("Running Restorer", func() {
+var _ = FDescribe("Running Restorer", func() {
 	var (
 		store           brtypes.SnapStore
 		rstr            *Restorer

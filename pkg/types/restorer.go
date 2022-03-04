@@ -29,6 +29,7 @@ import (
 const (
 	defaultName                     = "default"
 	defaultInitialAdvertisePeerURLs = "http://localhost:2380"
+	defaultAdvertiseClientURLs      = "http://localhost:2379"
 	defaultInitialClusterToken      = "etcd-cluster"
 	defaultMaxFetchers              = 6
 	defaultMaxCallSendMsgSize       = 10 * 1024 * 1024 //10Mib
@@ -61,6 +62,7 @@ type RestorationConfig struct {
 	InitialClusterToken      string   `json:"initialClusterToken,omitempty"`
 	RestoreDataDir           string   `json:"restoreDataDir,omitempty"`
 	InitialAdvertisePeerURLs []string `json:"initialAdvertisePeerURLs"`
+	AdvertiseClientURLs      []string `json:"advertiseClientURLs"`
 	Name                     string   `json:"name"`
 	SkipHashCheck            bool     `json:"skipHashCheck,omitempty"`
 	MaxFetchers              uint     `json:"maxFetchers,omitempty"`
@@ -79,6 +81,7 @@ func NewRestorationConfig() *RestorationConfig {
 		InitialClusterToken:      defaultInitialClusterToken,
 		RestoreDataDir:           fmt.Sprintf("%s.etcd", defaultName),
 		InitialAdvertisePeerURLs: []string{defaultInitialAdvertisePeerURLs},
+		AdvertiseClientURLs:      []string{defaultAdvertiseClientURLs},
 		Name:                     defaultName,
 		SkipHashCheck:            false,
 		MaxFetchers:              defaultMaxFetchers,

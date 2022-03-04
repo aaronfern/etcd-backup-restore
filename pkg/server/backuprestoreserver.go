@@ -17,8 +17,12 @@ package server
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +32,7 @@ import (
 	"github.com/gardener/etcd-backup-restore/pkg/leaderelection"
 	"github.com/gardener/etcd-backup-restore/pkg/metrics"
 	brtypes "github.com/gardener/etcd-backup-restore/pkg/types"
+	"gopkg.in/yaml.v2"
 
 	"github.com/gardener/etcd-backup-restore/pkg/defragmentor"
 	"github.com/gardener/etcd-backup-restore/pkg/errors"
@@ -88,20 +93,84 @@ func NewBackupRestoreServer(logger *logrus.Logger, config *BackupRestoreComponen
 
 // Run starts the backup restore server.
 func (b *BackupRestoreServer) Run(ctx context.Context) error {
-	clusterURLsMap, err := types.NewURLsMap(b.config.RestorationConfig.InitialCluster)
+	inputFileName := "/var/etcd/config/etcd.conf.yaml"
+	configYML, err := ioutil.ReadFile(inputFileName)
 	if err != nil {
-		// Ideally this case should not occur, since this check is done at the config validations.
-		b.logger.Fatalf("failed creating url map for restore cluster: %v", err)
+		b.logger.Fatalf("Unable to read etcd config file: %v", err)
+		return err
 	}
 
-	peerURLs, err := types.NewURLs(b.config.RestorationConfig.InitialAdvertisePeerURLs)
+	config := map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(configYML), &config); err != nil {
+		b.logger.Fatalf("Unable to unmarshal etcd config yaml file: %v", err)
+		return err
+	}
+
+	// fetch pod name from env
+	podName := os.Getenv("POD_NAME")
+	config["name"] = podName
+
+	protocol := "http"
+
+	initAdPeerURL := config["initial-advertise-peer-urls"]
+	svcName, namespace, peerPort, err := parsePeerURL(fmt.Sprint(initAdPeerURL))
+	if err != nil {
+		b.logger.Fatalf("Unable to determine service name, namespace, peer port from advertise peer urls : %v", err)
+		return err
+	}
+	domaiName := fmt.Sprintf("%s.%s.%s", svcName, namespace, "svc")
+	config["initial-advertise-peer-urls"] = fmt.Sprintf("%s://%s.%s:%s", protocol, podName, domaiName, peerPort)
+
+	advClientURL := config["advertise-client-urls"]
+	_, namespace, clientPort, err := parseAdvClientURL(fmt.Sprint(advClientURL))
+	if err != nil {
+		b.logger.Fatalf("Unable to determine service name, namespace, peer port from advertise client url : %v", err)
+		return err
+	}
+	domaiName = fmt.Sprintf("%s.%s.%s", svcName, namespace, "svc")
+	config["advertise-client-urls"] = fmt.Sprintf("%s://%s.%s:%s", protocol, podName, domaiName, clientPort)
+	cURLs := strings.Split(fmt.Sprint(config["advertise-client-urls"]), ",")
+
+	clusterURLsMap, err := types.NewURLsMap(fmt.Sprint(config["initial-cluster"]))
 	if err != nil {
 		// Ideally this case should not occur, since this check is done at the config validations.
 		b.logger.Fatalf("failed creating url map for restore cluster: %v", err)
+		return err
+	}
+
+	pURLS := strings.Split(fmt.Sprint(config["initial-advertise-peer-urls"]), ",")
+	peerURLs, err := types.NewURLs(pURLS)
+	if err != nil {
+		// Ideally this case should not occur, since this check is done at the config validations.
+		b.logger.Fatalf("failed creating peer URLs restore cluster: %v", err)
+		return err
+	}
+
+	embeddedEtcdQuotaBytes, err := strconv.ParseInt(fmt.Sprint(config["quota-backend-bytes"]), 10, 64)
+	if err != nil {
+		b.logger.Fatalf("failed to fetch ETCD Quota Bytes for restore cluster: %v", err)
+		return err
+	}
+
+	restoreConfig := &brtypes.RestorationConfig{
+		InitialCluster:           fmt.Sprint(config["initial-cluster"]),
+		InitialClusterToken:      fmt.Sprint(config["initial-cluster-token"]),
+		RestoreDataDir:           fmt.Sprint(config["data-dir"]),
+		InitialAdvertisePeerURLs: pURLS,
+		AdvertiseClientURLs:      cURLs,
+		Name:                     fmt.Sprint((config["name"])),
+		SkipHashCheck:            false,
+		MaxFetchers:              b.config.RestorationConfig.MaxFetchers,
+		MaxCallSendMsgSize:       b.config.RestorationConfig.MaxCallSendMsgSize,
+		MaxRequestBytes:          b.config.RestorationConfig.MaxRequestBytes,
+		MaxTxnOps:                b.config.RestorationConfig.MaxTxnOps,
+		EmbeddedEtcdQuotaBytes:   embeddedEtcdQuotaBytes,
+		AutoCompactionMode:       fmt.Sprint(config["auto-compaction-mode"]),
+		AutoCompactionRetention:  fmt.Sprint(config["auto-compaction-retention"]),
 	}
 
 	options := &brtypes.RestoreOptions{
-		Config:      b.config.RestorationConfig,
+		Config:      restoreConfig,
 		ClusterURLs: clusterURLsMap,
 		PeerURLs:    peerURLs,
 	}
@@ -111,36 +180,6 @@ func (b *BackupRestoreServer) Run(ctx context.Context) error {
 		runServerWithSnapshotter = false
 	}
 	return b.runServer(ctx, options)
-}
-
-// startHTTPServer creates and starts the HTTP handler
-// with status 503 (Service Unavailable)
-func (b *BackupRestoreServer) startHTTPServer(initializer initializer.Initializer, storageProvider string, etcdConfig *brtypes.EtcdConnectionConfig, ssr *snapshotter.Snapshotter) *HTTPHandler {
-	// Start http handler with Error state and wait till snapshotter is up
-	// and running before setting the status to OK.
-	handler := &HTTPHandler{
-		Port:                 b.config.ServerConfig.Port,
-		Initializer:          initializer,
-		Snapshotter:          ssr,
-		Logger:               b.logger,
-		StopCh:               make(chan struct{}),
-		EnableProfiling:      b.config.ServerConfig.EnableProfiling,
-		ReqCh:                make(chan struct{}),
-		AckCh:                make(chan struct{}),
-		EnableTLS:            (b.config.ServerConfig.TLSCertFile != "" && b.config.ServerConfig.TLSKeyFile != ""),
-		ServerTLSCertFile:    b.config.ServerConfig.TLSCertFile,
-		ServerTLSKeyFile:     b.config.ServerConfig.TLSKeyFile,
-		HTTPHandlerMutex:     &sync.Mutex{},
-		EtcdConnectionConfig: etcdConfig,
-		StorageProvider:      storageProvider,
-	}
-	handler.SetStatus(http.StatusServiceUnavailable)
-	b.logger.Info("Registering the http request handlers...")
-	handler.RegisterHandler()
-	b.logger.Info("Starting the http server...")
-	go handler.Start()
-
-	return handler
 }
 
 // runServer runs the etcd-backup-restore server according to snapstore provider configuration.
@@ -514,4 +553,50 @@ func (b *BackupRestoreServer) stopSnapshotter(handler *HTTPHandler) {
 	handler.ReqCh <- emptyStruct
 	handler.Logger.Info("Waiting for acknowledgment...")
 	<-handler.AckCh
+}
+
+// startHTTPServer creates and starts the HTTP handler
+// with status 503 (Service Unavailable)
+func (b *BackupRestoreServer) startHTTPServer(initializer initializer.Initializer, storageProvider string, etcdConfig *brtypes.EtcdConnectionConfig, ssr *snapshotter.Snapshotter) *HTTPHandler {
+	// Start http handler with Error state and wait till snapshotter is up
+	// and running before setting the status to OK.
+	handler := &HTTPHandler{
+		Port:                 b.config.ServerConfig.Port,
+		Initializer:          initializer,
+		Snapshotter:          ssr,
+		Logger:               b.logger,
+		StopCh:               make(chan struct{}),
+		EnableProfiling:      b.config.ServerConfig.EnableProfiling,
+		ReqCh:                make(chan struct{}),
+		AckCh:                make(chan struct{}),
+		EnableTLS:            (b.config.ServerConfig.TLSCertFile != "" && b.config.ServerConfig.TLSKeyFile != ""),
+		ServerTLSCertFile:    b.config.ServerConfig.TLSCertFile,
+		ServerTLSKeyFile:     b.config.ServerConfig.TLSKeyFile,
+		HTTPHandlerMutex:     &sync.Mutex{},
+		EtcdConnectionConfig: etcdConfig,
+		StorageProvider:      storageProvider,
+	}
+	handler.SetStatus(http.StatusServiceUnavailable)
+	b.logger.Info("Registering the http request handlers...")
+	handler.RegisterHandler()
+	b.logger.Info("Starting the http server...")
+	go handler.Start()
+
+	return handler
+}
+
+func parsePeerURL(peerURL string) (string, string, string, error) {
+	tokens := strings.Split(peerURL, "@")
+	if len(tokens) < 3 {
+		return "", "", "", fmt.Errorf("total length of tokens is less than three")
+	}
+	return tokens[0], tokens[1], tokens[2], nil
+}
+
+func parseAdvClientURL(advClientURL string) (string, string, string, error) {
+	tokens := strings.Split(advClientURL, "@")
+	if len(tokens) < 3 {
+		return "", "", "", fmt.Errorf("total length of tokens is less than three")
+	}
+	return tokens[0], tokens[1], tokens[2], nil
 }

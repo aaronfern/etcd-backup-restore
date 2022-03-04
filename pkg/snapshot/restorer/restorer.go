@@ -35,6 +35,7 @@ import (
 	"github.com/gardener/etcd-backup-restore/pkg/etcdutil/client"
 	"github.com/gardener/etcd-backup-restore/pkg/miscellaneous"
 	brtypes "github.com/gardener/etcd-backup-restore/pkg/types"
+	"github.com/gardener/etcd-backup-restore/pkg/wrappers"
 	"github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -57,8 +58,10 @@ import (
 )
 
 const (
-	tmpDir                  = "/tmp"
-	tmpEventsDataFilePrefix = "etcd-restore-"
+	tmpDir                               = "/tmp"
+	tmpEventsDataFilePrefix              = "etcd-restore-"
+	defaultEtcdConnectionEndpoint        = "0.0.0.0:2379"
+	NoLeaderState                 uint64 = 0
 )
 
 // Restorer is a struct for etcd data directory restorer
@@ -116,9 +119,17 @@ func (r *Restorer) Restore(ro brtypes.RestoreOptions) (*embed.Etcd, error) {
 	}
 	defer clientKV.Close()
 
-	r.logger.Infof("Applying delta snapshots...")
-	if err := r.applyDeltaSnapshots(clientKV, ro); err != nil {
-		return e, err
+	for {
+		if r.isLeader() {
+			r.logger.Infof("Applying delta snapshots...")
+			if err := r.applyDeltaSnapshots(clientKV, ro); err != nil {
+				return e, err
+			}
+		}
+		if r.checkRevisionForAll(ro) {
+			break
+		}
+		time.Sleep(time.Second * 5)
 	}
 
 	return e, nil
@@ -194,7 +205,7 @@ func (r *Restorer) makeDB(snapdir string, snap *brtypes.Snapshot, commit int, sk
 		return err
 	}
 	db.Sync()
-	totalTime := time.Now().Sub(startTime).Seconds()
+	totalTime := time.Since(startTime).Seconds()
 
 	if isCompressed {
 		r.logger.Infof("successfully fetched data of base snapshot in %v seconds [CompressionPolicy:%v]", totalTime, compressionPolicy)
@@ -624,7 +635,7 @@ func (r *Restorer) getEventsDataFromDeltaSnapshot(snap brtypes.Snapshot) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	totalTime := time.Now().Sub(startTime).Seconds()
+	totalTime := time.Since(startTime).Seconds()
 
 	if isCompressed {
 		r.logger.Infof("successfully fetched data of delta snapshot in %v seconds [CompressionPolicy:%v]", totalTime, compressionPolicy)
@@ -695,7 +706,7 @@ func applyEventsToEtcd(clientKV client.KVCloser, events []brtypes.Event) error {
 		case mvccpb.DELETE:
 			ops = append(ops, clientv3.OpDelete(string(ev.Kv.Key)))
 		default:
-			return fmt.Errorf("Unexpected event type")
+			return fmt.Errorf("unexpected event type")
 		}
 	}
 	_, err := clientKV.Txn(ctx).Then(ops...).Commit()
@@ -713,4 +724,68 @@ func verifySnapshotRevision(clientKV client.KVCloser, snap *brtypes.Snapshot) er
 		return fmt.Errorf("mismatched event revision while applying delta snapshot, expected %d but applied %d ", snap.LastRevision, etcdRevision)
 	}
 	return nil
+}
+
+func (r *Restorer) checkRevisionForAll(ro brtypes.RestoreOptions) bool {
+	for _, v := range ro.ClusterURLs {
+		clientFactory := etcdutil.NewClientFactory(ro.NewClientFactory, brtypes.EtcdConnectionConfig{
+			MaxCallSendMsgSize: ro.Config.MaxCallSendMsgSize,
+			Endpoints:          []string{v[0].String()},
+			// TODO(abdasgupta) : Make provision for secure connection
+			InsecureTransport: true,
+		})
+		clientKV, err := clientFactory.NewKV()
+		if err != nil {
+			r.logger.Errorf("Could not creat ETCD client for endpoint %s: %v", v[0].String(), err)
+			return false
+		}
+		defer clientKV.Close()
+
+		snapList := ro.DeltaSnapList
+		lastDeltaSnap := snapList[len(snapList)-1]
+		if err := verifySnapshotRevisionForAll(clientKV, lastDeltaSnap); err != nil {
+			r.logger.Errorf("All delta snapshots are not yet applied for %v because : %v", v[0].String(), err)
+			return false
+		}
+	}
+	return true
+}
+
+func verifySnapshotRevisionForAll(clientKV client.KVCloser, snap *brtypes.Snapshot) error {
+	ctx := context.TODO()
+	getResponse, err := clientKV.Get(ctx, "foo")
+	if err != nil {
+		return fmt.Errorf("failed to connect to etcd KV client: %v", err)
+	}
+	etcdRevision := getResponse.Header.GetRevision()
+	if snap.LastRevision < etcdRevision {
+		return fmt.Errorf("this etcd instance has not yet applied all the delta snapshots, expected revision equal or more than %d but applied %d ", snap.LastRevision, etcdRevision)
+	}
+	return nil
+}
+
+func (r *Restorer) isLeader() bool {
+	etcdConnectionConfig := &brtypes.EtcdConnectionConfig{
+		Endpoints:          []string{defaultEtcdConnectionEndpoint},
+		ConnectionTimeout:  wrappers.Duration{Duration: brtypes.DefaultEtcdConnectionTimeout},
+		SnapshotTimeout:    wrappers.Duration{Duration: brtypes.DefaultSnapshotTimeout},
+		DefragTimeout:      wrappers.Duration{Duration: brtypes.DefaultDefragConnectionTimeout},
+		InsecureTransport:  true,
+		InsecureSkipVerify: false,
+	}
+
+	factory := etcdutil.NewFactory(*etcdConnectionConfig)
+	clientMaintenance, err := factory.NewMaintenance()
+	if err != nil {
+		r.logger.Errorf("Could not create etcd client while determining if the embedded etcd is leader: %v", err)
+		return false
+	}
+
+	response, err := clientMaintenance.Status(context.Background(), defaultEtcdConnectionEndpoint)
+	if err != nil {
+		r.logger.Errorf("Could not determine if the embedded etcd is leader: %v", err)
+		return false
+	}
+
+	return response.Header.GetMemberId() == response.Leader
 }
