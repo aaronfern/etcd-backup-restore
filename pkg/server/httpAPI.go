@@ -37,6 +37,8 @@ import (
 	"github.com/ghodss/yaml"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
+	v1 "k8s.io/api/coordination/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -434,6 +436,28 @@ func (h *HTTPHandler) serveConfig(rw http.ResponseWriter, req *http.Request) {
 	}
 	domaiName = fmt.Sprintf("%s.%s.%s", svcName, namespace, "svc")
 	config["advertise-client-urls"] = fmt.Sprintf("%s://%s.%s:%s", protocol, podName, domaiName, clientPort)
+
+	clientSet, err := miscellaneous.GetKubernetesClientSetOrError()
+	if err != nil {
+		h.Logger.Errorf("failed to create clientset: %v", err)
+		return
+	}
+	h.Logger.Info("Single member restore case: k8s clientset created")
+
+	//Fetch lease associated with member
+	memberLease := &v1.Lease{}
+	err = clientSet.Get(context.TODO(), client.ObjectKey{
+		Namespace: os.Getenv("POD_NAMESPACE"),
+		Name:      os.Getenv("POD_NAME"),
+	}, memberLease)
+	if err != nil {
+		h.Logger.Errorf("error fetching lease: %v", err)
+	}
+	h.Logger.Info("Single member restore case: fetched lease")
+
+	if memberLease.Spec.HolderIdentity != nil {
+		config["initial-cluster-state"] = "existing"
+	}
 
 	data, err := yaml.Marshal(&config)
 	if err != nil {
