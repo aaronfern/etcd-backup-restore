@@ -243,6 +243,24 @@ func IsEtcdClusterHealthy(ctx context.Context, client etcdClient.MaintenanceClos
 	return true, nil
 }
 
+func GetStsReplicas(etcdConnectionConfig *brtypes.EtcdConnectionConfig) int {
+	clientSet, _ := GetKubernetesClientSetOrError()
+	podNS := os.Getenv("POD_NAMESPACE")
+	podName := os.Getenv("POD_NAME")
+	ctx, cancel := context.WithTimeout(context.TODO(), etcdConnectionConfig.ConnectionTimeout.Duration)
+	defer cancel()
+	curSts := &appsv1.StatefulSet{}
+	_ = clientSet.Get(ctx, client.ObjectKey{
+		Namespace: podNS,
+		Name:      podName[:strings.LastIndex(podName, "-")],
+	}, curSts)
+	// if errSts != nil {
+	// 	logger.Warn("error fetching etcd sts ", errSts)
+	// 	return ClusterStateNew
+	// }
+	return int(*curSts.Spec.Replicas)
+}
+
 // GetLeader will return the LeaderID as well as url of etcd leader.
 func GetLeader(ctx context.Context, clientMaintenance etcdClient.MaintenanceCloser, client etcdClient.ClusterCloser, endpoint string) (uint64, []string, error) {
 	if len(endpoint) == 0 {

@@ -116,6 +116,7 @@ func (b *BackupRestoreServer) Run(ctx context.Context) error {
 	if err != nil {
 		b.logger.Fatal("Please provide initial cluster value for embedded ETCD")
 	}
+	initialClusterSize = miscellaneous.GetStsReplicas(b.config.EtcdConnectionConfig)
 
 	clusterURLsMap, err := types.NewURLsMap(b.config.RestorationConfig.InitialCluster)
 	if err != nil {
@@ -222,7 +223,7 @@ func (b *BackupRestoreServer) runServer(ctx context.Context, restoreOpts *brtype
 			return m.UpdateMember(ctx, cli)
 		})
 		if err != nil {
-			b.logger.Error("unable to update the member")
+			b.logger.Warn("unable to update the member")
 		}
 	}
 

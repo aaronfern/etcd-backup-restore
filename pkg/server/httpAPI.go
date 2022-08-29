@@ -438,6 +438,12 @@ func (h *HTTPHandler) serveConfig(rw http.ResponseWriter, req *http.Request) {
 	domaiName := fmt.Sprintf("%s.%s.%s", svcName, namespace, "svc")
 	config["initial-advertise-peer-urls"] = fmt.Sprintf("%s://%s.%s:%s", protocol, podName, domaiName, peerPort)
 
+	if !h.ValidConfig(req.Context(), fmt.Sprintf("%s://%s.%s:%s", protocol, podName, domaiName, peerPort)) {
+		//Return empty configuration
+		http.ServeFile(rw, req, outputFileName)
+		return
+	}
+
 	advClientURL := config["advertise-client-urls"]
 	protocol, svcName, namespace, clientPort, err := parseAdvClientURL(fmt.Sprint(advClientURL))
 	if err != nil {
@@ -475,6 +481,49 @@ func (h *HTTPHandler) serveConfig(rw http.ResponseWriter, req *http.Request) {
 	http.ServeFile(rw, req, outputFileName)
 
 	h.Logger.Info("Served config for ETCD instance.")
+}
+
+func (h *HTTPHandler) ValidConfig(ctx context.Context, peerURL string) bool {
+	var err error
+	m := member.NewMemberControl(h.EtcdConnectionConfig)
+	learnerPresent, err := m.IsLearnerPresent(ctx)
+	if err != nil {
+		return true
+	}
+
+	clientFactory := etcdutil.NewFactory(*h.EtcdConnectionConfig, etcdclient.UseServiceEndpoints(true))
+	cli, _ := clientFactory.NewCluster()
+	defer cli.Close()
+
+	ctx, cancel := context.WithTimeout(ctx, member.EtcdTimeout)
+	defer cancel()
+	var memList *clientv3.MemberListResponse
+
+	backoff := retry.DefaultBackoff
+	backoff.Steps = 2
+	backoff.Duration = member.RetryPeriod
+	err = retry.OnError(backoff, func(err error) bool {
+		return err != nil
+	}, func() error {
+		memList, err = cli.MemberList(ctx)
+		return err
+	})
+	if err != nil {
+		return true
+	}
+
+	selfLearner := false
+	for _, member := range memList.Members {
+		if member.IsLearner && member.PeerURLs[0] == peerURL {
+			selfLearner = true
+		}
+	}
+
+	if learnerPresent && !selfLearner {
+		return false
+	}
+
+	return true
 }
 
 // GetClusterState returns the Cluster state either `new` or `existing`.
